@@ -64,3 +64,25 @@ def parse_response(response):
 
     return status_line, headers, body
 
+def main():
+    #Caso esqueça de passar a URL
+    if len(sys.argv) != 2:
+        print("Uso: python client.py <URL>")
+        sys.exit(1)
+
+    #Ordem de fluxo do programa:
+    url = sys.argv[1]
+    host, port, path = parse_url(url)                          # Parse a URL 
+    request_data = build_request(host, path)                   # Monta a requisição HTTP
+    raw_response = send_request(host, port, request_data)      # Envia a requisição e recebe a resposta crua
+    status_line, headers, body = parse_response(raw_response)  # Analisa a resposta e separa
+
+    # Imprime o status, headers e corpo da resposta
+    print("Status Line:", status_line)
+    print("Headers:")
+    for header in headers:
+        print(header)
+    print("\nBody:\n", body)
+
+if __name__ == "__main__":
+    main()
