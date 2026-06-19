@@ -50,4 +50,17 @@ def send_request(host, port, data):
 
     return resposta
 
+def parse_response(response):
+    # A resposta HTTP é composta por uma linha de status, seguida por headers e um corpo.
+    # O .partition(b"\r\n\r\n") é para separar o cabeçalho do corpo da resposta.
+    cabecalho_bruto, _, corpo = response.partition(b"\r\n\r\n")
+    linhas = cabecalho_bruto.split(b"\r\n")
+
+    # O .decode converte os bytes em string
+    # Oerrors="replace" substitui caracteres inválidos
+    status_line = linhas[0].decode("utf-8", errors="replace")
+    headers = [linha.decode("utf-8", errors="replace") for linha in linhas[1:]]
+    body = corpo.decode("utf-8", errors="replace")
+
+    return status_line, headers, body
 
