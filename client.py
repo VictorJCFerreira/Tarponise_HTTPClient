@@ -35,5 +35,19 @@ def build_request(host, path, method="GET"):
     requisicao = request_line + headers + "\r\n"
     return requisicao.encode("utf-8")
 
+def send_request(host, port, data):
+    #Socket IPv4 (AF_INET) e TCP (SOCK_STREAM) - {UDP seria SOCK_DGRAM}
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock: 
+        sock.connect((host, port))  #Abre o Scoket e conecta ao servidor 
+        sock.sendall(data)          #Envia a requisição HTTP crua para o servidor
+
+        resposta = b""              #Lê toda a resposta do servidor
+        while True:
+            chunk = sock.recv(4096) #Recebe os dados em blocos de 4096 bytes
+            if not chunk:
+                break
+            resposta += chunk
+
+    return resposta
 
 
