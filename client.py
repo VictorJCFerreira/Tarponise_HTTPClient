@@ -1,5 +1,6 @@
 import socket
 import sys
+import ssl
 import ipaddress
 from urllib.parse import urlparse, urljoin
 
@@ -17,11 +18,14 @@ def assert_destino_publico(host):
 def parse_url(url):
     parsed = urlparse(url)
 
-    if parsed.scheme != "http":
-        raise ValueError("Apenas suporte http:// (sem https).")
-    
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"esquema não suportado: {parsed.scheme!r}. Use http:// ou https://."
+        )
+
+    scheme = parsed.scheme
     host = parsed.hostname
-    port = parsed.port or 80
+    port = parsed.port or (443 if scheme == "https" else 80)
     path = parsed.path or "/"
     if parsed.query:
         path += "?" + parsed.query
@@ -34,10 +38,10 @@ def parse_url(url):
     # Separa o Host, pois muitos domínios copartilham o mesmo endereço IP físico, ele indica qual aplicação específica 
     # deve processar a requisição.
     # A porta é o número da porta TCP onde o servidor está escutando.
-    # Se a URL não especificar uma porta, usamos a porta padrão 80 (HTTP).
+    # Se a URL não especificar uma porta, usamos a porta padrão 80 (HTTP) ou 443(HTTPS).
     # E o path é a parte da URL que indica o recurso específico que queremos acessar no servidor. 
     # Se a URL não tiver um path, usamos "/" como padrão, que geralmente representa a página inicial ou raiz do site.
-    return host, port, path
+    return scheme, host, port, path
 
 def build_request(host, path, method="GET"):
     request_line = f"{method} {path} HTTP/1.1\r\n"
@@ -52,19 +56,27 @@ def build_request(host, path, method="GET"):
     requisicao = request_line + headers + "\r\n"
     return requisicao.encode("utf-8")
 
-def send_request(host, port, data, timeout=10):
+def send_request(scheme, host, port, data, timeout=10):
     # Socket IPv4 (AF_INET) e TCP (SOCK_STREAM) - {UDP seria SOCK_DGRAM}
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock: 
-        sock.connect((host, port))  # Abre o Scoket e conecta ao servidor 
-        sock.sendall(data)          # Envia a requisição HTTP crua para o servidor
-        sock.settimeout(timeout)    # Define um timeout para evitar ficar esperando indefinidamente
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)                                    # Define um tempo limite para a conexão
 
-        resposta = b""              # Lê toda a resposta do servidor
+    if scheme == "https":                       #Envolve o socket com TLS se for HTTPS
+        context = ssl.create_default_context()
+        sock = context.wrap_socket(sock, server_hostname=host)
+    
+    try:
+        sock.connect((host, port))   # com TLS, o handshake acontece aqui
+        sock.sendall(data)
+
+        resposta = b""
         while True:
-            chunk = sock.recv(4096) # Recebe os dados em blocos de 4096 bytes
+            chunk = sock.recv(4096)
             if not chunk:
                 break
             resposta += chunk
+    finally:
+        sock.close()
 
     return resposta
 
@@ -95,9 +107,9 @@ def get_header(headers, nome):
     return None                     # Caso nao ache nada, retorna None
 
 def fetch(url):                                      # Organizando uma requisição completa em uma função
-    host, port, path = parse_url(url)                # Parse a URL
+    scheme, host, port, path = parse_url(url)                # Parse a URL
     requisicao = build_request(host, path)           # Monta a requisição HTTP crua
-    resposta = send_request(host, port, requisicao)  # Envia a requisição e lê a resposta
+    resposta = send_request(scheme, host, port, requisicao)  # Envia a requisição e lê a resposta
     return parse_response(resposta)                  # Analisa a resposta e separa
 
 
@@ -147,6 +159,9 @@ def main():
         sys.exit(1)
     except socket.gaierror:
         print("ERRO: Host não encontrado(DNS Falhou)")
+        sys.exit(1)
+    except ssl.SSLError as e:
+        print(f"Erro de TLS/certificado: {e}")
         sys.exit(1)
     except OSError as e:
         print(f"Erro de rede: {e}")
