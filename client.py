@@ -1,6 +1,6 @@
 import socket
 import sys
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 def parse_url(url):
     parsed = urlparse(url)
@@ -36,15 +36,15 @@ def build_request(host, path, method="GET"):
     return requisicao.encode("utf-8")
 
 def send_request(host, port, data, timeout=10):
-    #Socket IPv4 (AF_INET) e TCP (SOCK_STREAM) - {UDP seria SOCK_DGRAM}
+    # Socket IPv4 (AF_INET) e TCP (SOCK_STREAM) - {UDP seria SOCK_DGRAM}
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock: 
-        sock.connect((host, port))  #Abre o Scoket e conecta ao servidor 
-        sock.sendall(data)          #Envia a requisição HTTP crua para o servidor
-        sock.settimeout(timeout)    #Define um timeout para evitar ficar esperando indefinidamente
+        sock.connect((host, port))  # Abre o Scoket e conecta ao servidor 
+        sock.sendall(data)          # Envia a requisição HTTP crua para o servidor
+        sock.settimeout(timeout)    # Define um timeout para evitar ficar esperando indefinidamente
 
-        resposta = b""              #Lê toda a resposta do servidor
+        resposta = b""              # Lê toda a resposta do servidor
         while True:
-            chunk = sock.recv(4096) #Recebe os dados em blocos de 4096 bytes
+            chunk = sock.recv(4096) # Recebe os dados em blocos de 4096 bytes
             if not chunk:
                 break
             resposta += chunk
@@ -65,18 +65,60 @@ def parse_response(response):
 
     return status_line, headers, body
 
+def get_status_code(status_line):
+    pedaco = status_line.split()    # O split separa a linha em pedaços 
+    return int(pedaco[1])           # O status é sempre o segundo pedaço 'HTTP/1.0 200 OK'
+
+def get_header(headers, nome):
+    nome = nome.lower()             # Exemplo de header: "Location: http://www.google.com/""
+    for linha in headers:
+        chave, _, valor = linha.partition(":")   
+        if chave.strip().lower() == nome:
+            return valor.strip()
+    return None                     # Caso nao ache nada, retorna None
+
+def fetch(url):                                      # Organizando uma requisição completa em uma função
+    host, port, path = parse_url(url)                # Parse a URL
+    requisicao = build_request(host, path)           # Monta a requisição HTTP crua
+    resposta = send_request(host, port, requisicao)  # Envia a requisição e lê a resposta
+    return parse_response(resposta)                  # Analisa a resposta e separa
+
+
 def main():
-    #Caso esqueça de passar a URL
+    # Caso esqueça de passar a URL
     if len(sys.argv) != 2:
         print("Uso: python client.py <URL>")
         sys.exit(1)
 
-    #Ordem de fluxo do programa:
+    # Ordem de fluxo do programa:
     url = sys.argv[1]
+    max_redirects = 5
+    redirects = 0
+
     try:
-        host, port, path = parse_url(url)                          # Parse a URL 
-        request_data = build_request(host, path)                   # Monta a requisição HTTP
-        raw_response = send_request(host, port, request_data)      # Envia a requisição e recebe a resposta crua
+        while True:
+            status_line, headers, body = fetch(url)
+            codigo = get_status_code(status_line)
+
+            if not (300 <= codigo < 400):               #Verifica se o código é de redirecionamento (3xx)
+                break
+            location = get_header(headers, "Location")  # Se for um redirect, tem Location
+            if location is None:
+                break                                   # Redirect sem Location: não há pra onde seguir
+
+            if redirects >= max_redirects:              # Protege contra loop infinito (A -> B -> A -> ...).
+                print(f"Erro: muitos redirects (limite de {max_redirects}).")
+                sys.exit(1)
+
+            # Caso fosse um servidor, teriamos que ter cuidado com Open Directs.
+            # Onde um atacante poderia redirecionar para um site malicioso.
+            # Ou até mesmo achar um SSRF
+            # https://confiavel.com/go?next=http://169.254.169.254/latest/meta-data/
+            redirects += 1
+            nova_url = urljoin(url, location)   # Resolve relativo OU absoluto
+            print(f"-> {codigo} redirecionando para: {nova_url}")
+            url = nova_url                      # Volta ao topo do while e requisita a nova URL
+
     except ValueError as e:
         print(f"URL inválida: {e}")
         sys.exit(1)
@@ -92,8 +134,6 @@ def main():
     except OSError as e:
         print(f"Erro de rede: {e}")
         sys.exit(1)
-
-    status_line, headers, body = parse_response(raw_response)  # Analisa a resposta e separa
 
     # Imprime o status, headers e corpo da resposta
     print("Status Line:", status_line)
