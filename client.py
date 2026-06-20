@@ -35,11 +35,12 @@ def build_request(host, path, method="GET"):
     requisicao = request_line + headers + "\r\n"
     return requisicao.encode("utf-8")
 
-def send_request(host, port, data):
+def send_request(host, port, data, timeout=10):
     #Socket IPv4 (AF_INET) e TCP (SOCK_STREAM) - {UDP seria SOCK_DGRAM}
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock: 
         sock.connect((host, port))  #Abre o Scoket e conecta ao servidor 
         sock.sendall(data)          #Envia a requisição HTTP crua para o servidor
+        sock.settimeout(timeout)    #Define um timeout para evitar ficar esperando indefinidamente
 
         resposta = b""              #Lê toda a resposta do servidor
         while True:
@@ -72,9 +73,26 @@ def main():
 
     #Ordem de fluxo do programa:
     url = sys.argv[1]
-    host, port, path = parse_url(url)                          # Parse a URL 
-    request_data = build_request(host, path)                   # Monta a requisição HTTP
-    raw_response = send_request(host, port, request_data)      # Envia a requisição e recebe a resposta crua
+    try:
+        host, port, path = parse_url(url)                          # Parse a URL 
+        request_data = build_request(host, path)                   # Monta a requisição HTTP
+        raw_response = send_request(host, port, request_data)      # Envia a requisição e recebe a resposta crua
+    except ValueError as e:
+        print(f"URL inválida: {e}")
+        sys.exit(1)
+    except socket.timeout:
+        print("Tempo limite da requisição excedido.(Timeout)")
+        sys.exit(1)
+    except ConnectionRefusedError:
+        print("ERRO: Conexão recusada")
+        sys.exit(1)
+    except socket.gaierror:
+        print("ERRO: Host não encontrado(DNS Falhou)")
+        sys.exit(1)
+    except OSError as e:
+        print(f"Erro de rede: {e}")
+        sys.exit(1)
+
     status_line, headers, body = parse_response(raw_response)  # Analisa a resposta e separa
 
     # Imprime o status, headers e corpo da resposta
