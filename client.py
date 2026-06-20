@@ -1,6 +1,18 @@
 import socket
 import sys
+import ipaddress
 from urllib.parse import urlparse, urljoin
+
+# Defesa contra SSRF: bloqueia conexões para IPs internos/privados
+BLOQUEAR_IPS_INTERNOS = True
+
+def assert_destino_publico(host):
+    ip_str = socket.gethostbyname(host)   # nome -> IP (resolve o DNS)
+    ip = ipaddress.ip_address(ip_str)     # objeto que sabe se autoclassificar
+
+    if (ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+        raise ValueError(f"destino interno bloqueado (SSRF): {host} -> {ip}")
 
 def parse_url(url):
     parsed = urlparse(url)
@@ -13,6 +25,11 @@ def parse_url(url):
     path = parsed.path or "/"
     if parsed.query:
         path += "?" + parsed.query
+
+    # Defesa SSRF: roda a CADA chamada — logo, a cada redirect também, já que
+    # fetch() -> parse_url() é o ponto único por onde toda requisição passa.
+    if BLOQUEAR_IPS_INTERNOS:
+        assert_destino_publico(host)
     
     # Separa o Host, pois muitos domínios copartilham o mesmo endereço IP físico, ele indica qual aplicação específica 
     # deve processar a requisição.
